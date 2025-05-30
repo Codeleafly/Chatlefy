@@ -86,6 +86,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({ origin: "*" }));
 app.use(bodyParser.json());
 
+// ✅ Serve static files from public folder
+app.use(express.static(path.join(__dirname, "public")));
+
 let userHistories = {};
 let requestCounter = {};
 function resetCountersDaily() {
