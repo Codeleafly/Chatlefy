@@ -101,7 +101,7 @@ app.post("/chat", async (req, res) => {
         temperature: 1.0,
         topK: 1,
         topP: 1,
-        thinkingConfig: { thinkingBudget: 0 }, // Disable thinking for faster response
+        thinkingConfig: { thinkingBudget: -1 }, // automatic thinking for better response
         tools: [
           { googleSearch: {} },   // real-time web grounding
           { codeExecution: {} },  // Python code execution
@@ -171,3 +171,4 @@ app.post("/chat", async (req, res) => {
 app.listen(PORT, () => {
   logger.info(`Chatlefy running on http://localhost:${PORT}`);
 });
+
