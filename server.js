@@ -4,7 +4,6 @@ const path = require("path");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-const crypto = require("crypto");
 const winston = require("winston");
 const { GoogleGenAI } = require("@google/genai");
 
@@ -20,13 +19,8 @@ const logger = winston.createLogger({
     )
   ),
   transports: [
-    new winston.transports.File({
-      filename: path.join(logDir, "error.log"),
-      level: "error",
-    }),
-    new winston.transports.File({
-      filename: path.join(logDir, "combined.log"),
-    }),
+    new winston.transports.File({ filename: path.join(logDir, "error.log"), level: "error" }),
+    new winston.transports.File({ filename: path.join(logDir, "combined.log") }),
     new winston.transports.Console(),
   ],
 });
@@ -59,8 +53,6 @@ const corsOptions = {
 const app = express();
 app.use(cors(corsOptions));
 app.use(bodyParser.json());
-
-// ✅ Static files serve from 'public'
 app.use(express.static(path.join(__dirname, "public")));
 
 // === AI Setup ===
@@ -109,8 +101,12 @@ app.post("/chat", async (req, res) => {
         temperature: 1.0,
         topK: 1,
         topP: 1,
-        thinkingConfig: { thinkingBudget: 0 },
-        tools: [{ googleSearch: {} }, { codeExecution: {} }],
+        thinkingConfig: { thinkingBudget: 0 }, // Disable thinking for faster response
+        tools: [
+          { googleSearch: {} },   // real-time web grounding
+          { codeExecution: {} },  // Python code execution
+          { urlContext: {} },     // URL context fetching
+        ],
       },
     });
     userHistories[userId] = { chat };
@@ -142,14 +138,29 @@ app.post("/chat", async (req, res) => {
       currentMonth: now.getMonth() + 1,
     };
 
-    const messageWithTime = `{"context": ${JSON.stringify(
-      dateTimeInfo
-    )}, "user_message": "${cleanedMessage}"}`;
+    const messageWithTime = `{"context": ${JSON.stringify(dateTimeInfo)}, "user_message": "${cleanedMessage}"}`;
 
-    const result = await userHistories[userId].chat.sendMessage({
-      message: messageWithTime,
-    });
-    res.json({ reply: result.text });
+    const response = await userHistories[userId].chat.sendMessage({ message: messageWithTime });
+
+    // Optional: Append inline citations if googleSearch returns metadata
+    let replyText = response.text;
+    if (response.candidates?.[0]?.groundingMetadata) {
+      const supports = response.candidates[0].groundingMetadata.groundingSupports || [];
+      const chunks = response.candidates[0].groundingMetadata.groundingChunks || [];
+      const sortedSupports = [...supports].sort((a, b) => (b.segment?.endIndex ?? 0) - (a.segment?.endIndex ?? 0));
+      for (const support of sortedSupports) {
+        const endIndex = support.segment?.endIndex;
+        if (!endIndex || !support.groundingChunkIndices?.length) continue;
+        const citationLinks = support.groundingChunkIndices
+          .map(i => chunks[i]?.web?.uri ? `[${i + 1}](${chunks[i].web.uri})` : null)
+          .filter(Boolean);
+        if (citationLinks.length > 0) {
+          replyText = replyText.slice(0, endIndex) + citationLinks.join(", ") + replyText.slice(endIndex);
+        }
+      }
+    }
+
+    res.json({ reply: replyText });
   } catch (err) {
     logger.error(`Chat error for ${userId}: ${err.message}`);
     res.status(500).json({ reply: "Chatlefy is currently unavailable." });
